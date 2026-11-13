@@ -20,9 +20,12 @@ MAX_QUEUED_UPLOAD_BYTES_PER_GUILD=104857600
 MAX_TEMP_UPLOAD_FILES=20
 MAX_TEMP_UPLOAD_BYTES=209715200
 MAX_QUEUE_TRACKS_PER_GUILD=50
+PLAY_BLACKLIST_WORDS=sex,sexual,porn,pornography,hentai,erotic,nude,nudity,naked,lingerie,transparent lingerie,onlyfans,bikini haul,micro bikini,sexy,asmr
 ```
 
 Upload limits default to 20 MiB per file, a 15-second per-user cooldown, one concurrent upload per guild, and bounded per-guild queue and temporary storage. The music queue accepts up to 50 pending tracks per guild across uploads, links, searches, and playlists. Values are in bytes or milliseconds as indicated by their names.
+
+`PLAY_BLACKLIST_WORDS` is a comma-separated list checked against song and artist input for `/play`, plus video titles from `/link` YouTube URLs and playlists. Matching is case-insensitive, ignores punctuation differences, and requires whole words or phrases. If omitted, the starter list shown above is used; set it to an empty value to disable the filter.
 
 Start Command
 
