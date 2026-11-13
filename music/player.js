@@ -12,44 +12,22 @@ import { Ytdl, Quality } from '@distube/ytdl-core';
 import { getQueue, deleteQueue } from './queue.js';
 import { config } from '../config.js';
 import fs from 'node:fs';
-import path from 'node:path';
 
 const yt = new Ytdl();
 
-// 👇 UPDATED CLEANUP FUNCTION with retry logic for Windows EBUSY errors
-function sweepTempFolder(keepFilePath = null) {
-  const tempDir = path.join(process.cwd(), 'temp');
-  if (!fs.existsSync(tempDir)) return;
+function cleanupTrackFile(q, track, attempts = 0) {
+  if (!track?.filePath || track.fileCleaned) return;
 
-  const files = fs.readdirSync(tempDir);
-  for (const file of files) {
-    const fullPath = path.join(tempDir, file);
-    
-    // If this file is the one currently playing, DO NOT delete it.
-    if (keepFilePath && path.resolve(fullPath) === path.resolve(keepFilePath)) {
-      continue;
+  try {
+    fs.rmSync(track.filePath, { force: true });
+    track.fileCleaned = true;
+    q.releaseUpload(track);
+  } catch (error) {
+    if (['EBUSY', 'EPERM'].includes(error.code) && attempts < 5) {
+      setTimeout(() => cleanupTrackFile(q, track, attempts + 1), 200);
+      return;
     }
-
-    let attempts = 0;
-    const maxAttempts = 5;
-    
-    const tryDelete = () => {
-      try {
-        fs.unlinkSync(fullPath);
-        console.log(`🗑️ Swept and deleted orphaned temp file: ${file}`);
-      } catch (err) {
-        attempts++;
-        // If the file is busy and we have retries left, wait 200ms and try again
-        if (err.code === 'EBUSY' && attempts < maxAttempts) {
-          console.log(`⏳ File busy, retrying (${attempts}/${maxAttempts}): ${file}`);
-          setTimeout(tryDelete, 200);
-        } else {
-          console.error(`Failed to sweep file: ${file}`, err);
-        }
-      }
-    };
-    
-    tryDelete();
+    console.error(`Failed to remove uploaded track: ${track.filePath}`, error);
   }
 }
 
@@ -74,14 +52,20 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
     q.volume = config.defaultVolume;
 
     q.player.on(AudioPlayerStatus.Idle, () => {
-      sweepTempFolder(null); 
+      cleanupTrackFile(q, q.current);
+      q.current = null;
+      q.playing = false;
+      if (q.closed) return;
       playNext(guild.id);
     });
 
     q.player.on('error', (err) => {
       console.error('Audio player error:', err);
       q.textChannel?.send(`⚠️ Playback error: ${err.message}`);
-      sweepTempFolder(null);
+      cleanupTrackFile(q, q.current);
+      q.current = null;
+      q.playing = false;
+      if (q.closed) return;
       playNext(guild.id);
     });
     
@@ -93,10 +77,6 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
       console.log(`Connection State: ${oldState.status} -> ${newState.status}`);
     });
 
-    q.connection.on('destroy', () => {
-      sweepTempFolder(null); 
-    });
-
     setupAutoLeave(guild.id);
   }
   return q;
@@ -104,6 +84,7 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
 
 export async function playNext(guildId) {
   const q = getQueue(guildId);
+  if (q.closed) return;
   const track = q.next();
 
   if (!track) {
@@ -123,22 +104,28 @@ export async function playNext(guildId) {
     } catch (error) {
       console.error('Voice connection not ready:', error);
       q.textChannel?.send('⚠️ Voice connection failed to establish, please try again.');
+      cleanupTrackFile(q, track);
+      q.current = null;
+      q.playing = false;
+      return;
+    }
+
+    if (q.closed) {
+      cleanupTrackFile(q, track);
+      q.current = null;
       return;
     }
 
     let resource;
 
     if (track.filePath) {
-      sweepTempFolder(track.filePath); 
-
       resource = createAudioResource(track.filePath, {
         inputType: StreamType.Arbitrary,
         inlineVolume: true,
       });
     } else {
-      sweepTempFolder(null);
-
       const info = await yt.getInfo(track.url);
+      if (q.closed) return;
       const stream = yt.download(info, {
         quality: Quality.HighestAudio,
         filter: { hasAudio: true, hasVideo: false },
@@ -160,6 +147,10 @@ export async function playNext(guildId) {
   } catch (err) {
     console.error('Failed to play track:', err);
     q.textChannel?.send(`⚠️ Couldn't play **${track.title}**, skipping.`);
+    cleanupTrackFile(q, track);
+    q.current = null;
+    q.playing = false;
+    if (q.closed) return;
     playNext(guildId);
   }
 }
@@ -177,11 +168,7 @@ export async function enqueueAndPlay(guild, voiceChannel, textChannel, track) {
 export function skipTrack(guildId) {
   const q = getQueue(guildId);
   if (!q.player) return false;
-  
-  sweepTempFolder(null); 
-  
-  q.player.stop();
-  return true;
+  return q.player.stop();
 }
 
 export function pauseTrack(guildId) {
@@ -196,11 +183,13 @@ export function resumeTrack(guildId) {
 
 export function stopAndLeave(guildId) {
   const q = getQueue(guildId);
-  
-  sweepTempFolder(null);
-  
-  q.clear();
-  q.player?.stop();
+  for (const track of q.clear()) cleanupTrackFile(q, track);
+  q.closed = true;
+  const stopped = q.player?.stop() ?? false;
+  if (!stopped) {
+    cleanupTrackFile(q, q.current);
+    q.current = null;
+  }
   q.connection?.destroy();
   deleteQueue(guildId);
 }
@@ -220,7 +209,6 @@ function setupAutoLeave(guildId) {
         entersState(q.connection, VoiceConnectionStatus.Connecting, 5000),
       ]);
     } catch {
-      sweepTempFolder(null);
       stopAndLeave(guildId);
     }
   });
