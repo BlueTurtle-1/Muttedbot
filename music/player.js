@@ -16,8 +16,7 @@ import path from 'node:path';
 
 const yt = new Ytdl();
 
-// 👇 NEW BRUTE-FORCE CLEANUP FUNCTION
-// This scans the temp folder and deletes any file that isn't the actively playing one.
+// 👇 UPDATED CLEANUP FUNCTION with retry logic for Windows EBUSY errors
 function sweepTempFolder(keepFilePath = null) {
   const tempDir = path.join(process.cwd(), 'temp');
   if (!fs.existsSync(tempDir)) return;
@@ -31,12 +30,26 @@ function sweepTempFolder(keepFilePath = null) {
       continue;
     }
 
-    try {
-      fs.unlinkSync(fullPath);
-      console.log(`🗑️ Swept and deleted orphaned temp file: ${file}`);
-    } catch (err) {
-      console.error(`Failed to sweep file: ${file}`, err);
-    }
+    let attempts = 0;
+    const maxAttempts = 5;
+    
+    const tryDelete = () => {
+      try {
+        fs.unlinkSync(fullPath);
+        console.log(`🗑️ Swept and deleted orphaned temp file: ${file}`);
+      } catch (err) {
+        attempts++;
+        // If the file is busy and we have retries left, wait 200ms and try again
+        if (err.code === 'EBUSY' && attempts < maxAttempts) {
+          console.log(`⏳ File busy, retrying (${attempts}/${maxAttempts}): ${file}`);
+          setTimeout(tryDelete, 200);
+        } else {
+          console.error(`Failed to sweep file: ${file}`, err);
+        }
+      }
+    };
+    
+    tryDelete();
   }
 }
 
@@ -61,7 +74,6 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
     q.volume = config.defaultVolume;
 
     q.player.on(AudioPlayerStatus.Idle, () => {
-      // When a song ends naturally, sweep the folder (no file is playing now)
       sweepTempFolder(null); 
       playNext(guild.id);
     });
@@ -82,7 +94,7 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
     });
 
     q.connection.on('destroy', () => {
-      sweepTempFolder(null); // Clean up if disconnected
+      sweepTempFolder(null); 
     });
 
     setupAutoLeave(guild.id);
@@ -117,7 +129,6 @@ export async function playNext(guildId) {
     let resource;
 
     if (track.filePath) {
-      // 👇 IMPORTANT: Before playing the new file, sweep any old files left behind
       sweepTempFolder(track.filePath); 
 
       resource = createAudioResource(track.filePath, {
@@ -125,7 +136,6 @@ export async function playNext(guildId) {
         inlineVolume: true,
       });
     } else {
-      // If we are playing a YouTube link, sweep ALL files in temp
       sweepTempFolder(null);
 
       const info = await yt.getInfo(track.url);
@@ -168,7 +178,6 @@ export function skipTrack(guildId) {
   const q = getQueue(guildId);
   if (!q.player) return false;
   
-  // 👇 When skipping, sweep EVERYTHING. The next song will download/sweep anyway.
   sweepTempFolder(null); 
   
   q.player.stop();
@@ -188,7 +197,6 @@ export function resumeTrack(guildId) {
 export function stopAndLeave(guildId) {
   const q = getQueue(guildId);
   
-  // 👇 Sweep everything when leaving
   sweepTempFolder(null);
   
   q.clear();
