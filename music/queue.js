@@ -1,4 +1,6 @@
 // Simple per-guild music queue manager
+import { config } from '../config.js';
+
 class GuildQueue {
   constructor(guildId) {
     this.guildId = guildId;
@@ -14,12 +16,29 @@ class GuildQueue {
     this.closed = false;
   }
 
-  add(track) {
-    this.tracks.push(track);
+  get availableSlots() {
+    return Math.max(0, config.maxQueueTracksPerGuild - this.tracks.length);
+  }
+
+  canAdd(count = 1) {
+    return !this.closed && Number.isSafeInteger(count) && count > 0 && count <= this.availableSlots;
+  }
+
+  add(track, { front = false } = {}) {
+    if (!this.canAdd()) return false;
+    if (front) this.tracks.unshift(track);
+    else this.tracks.push(track);
     if (track.filePath) {
       this.uploadCount++;
       this.uploadBytes += track.fileSize || 0;
     }
+    return true;
+  }
+
+  addMany(tracks) {
+    if (!this.canAdd(tracks.length)) return false;
+    for (const track of tracks) this.add(track);
+    return true;
   }
 
   releaseUpload(track) {

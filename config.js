@@ -23,4 +23,5 @@ export const config = {
   ),
   maxTempUploadFiles: positiveInteger(process.env.MAX_TEMP_UPLOAD_FILES, 20),
   maxTempUploadBytes: positiveInteger(process.env.MAX_TEMP_UPLOAD_BYTES, 200 * 1024 * 1024),
+  maxQueueTracksPerGuild: positiveInteger(process.env.MAX_QUEUE_TRACKS_PER_GUILD, 50),
 };

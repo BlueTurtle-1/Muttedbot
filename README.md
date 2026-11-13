@@ -19,9 +19,10 @@ MAX_QUEUED_UPLOADS_PER_GUILD=10
 MAX_QUEUED_UPLOAD_BYTES_PER_GUILD=104857600
 MAX_TEMP_UPLOAD_FILES=20
 MAX_TEMP_UPLOAD_BYTES=209715200
+MAX_QUEUE_TRACKS_PER_GUILD=50
 ```
 
-Upload limits default to 20 MiB per file, a 15-second per-user cooldown, one concurrent upload per guild, and bounded per-guild queue and temporary storage. Values are in bytes or milliseconds as indicated by their names.
+Upload limits default to 20 MiB per file, a 15-second per-user cooldown, one concurrent upload per guild, and bounded per-guild queue and temporary storage. The music queue accepts up to 50 pending tracks per guild across uploads, links, searches, and playlists. Values are in bytes or milliseconds as indicated by their names.
 
 Start Command
 

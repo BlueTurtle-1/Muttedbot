@@ -91,6 +91,7 @@ export async function playNext(guildId) {
     q.playing = false;
     return;
   }
+  q.playing = true;
 
   if ((!track.url || typeof track.url !== 'string') && !track.filePath) {
     console.error(`❌ Cannot play "${track.title}": URL/File is missing or invalid.`);
@@ -156,13 +157,29 @@ export async function playNext(guildId) {
 }
 
 export async function enqueueAndPlay(guild, voiceChannel, textChannel, track) {
-  const q = ensureConnection(guild, voiceChannel, textChannel);
-  q.add(track);
+  const q = getQueue(guild.id);
+  if (!q.canAdd()) return false;
+  ensureConnection(guild, voiceChannel, textChannel);
+  if (!q.add(track)) return false;
   if (!q.playing) {
-    playNext(guild.id);
+    q.playing = true;
+    void playNext(guild.id);
   } else {
     textChannel.send(`➕ Added to queue: **${track.title}**`);
   }
+  return true;
+}
+
+export async function enqueueManyAndPlay(guild, voiceChannel, textChannel, tracks) {
+  const q = getQueue(guild.id);
+  if (!q.canAdd(tracks.length)) return false;
+  ensureConnection(guild, voiceChannel, textChannel);
+  if (!q.addMany(tracks)) return false;
+  if (!q.playing) {
+    q.playing = true;
+    void playNext(guild.id);
+  }
+  return true;
 }
 
 export function skipTrack(guildId) {

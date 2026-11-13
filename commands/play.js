@@ -31,6 +31,7 @@ export async function execute(interaction) {
     return interaction.editReply(`❌ No results found for "${query}".`);
   }
 
-  await enqueueAndPlay(interaction.guild, voiceChannel, interaction.channel, track);
+  const added = await enqueueAndPlay(interaction.guild, voiceChannel, interaction.channel, track);
+  if (!added) return interaction.editReply('❌ The queue is full. Try again after a track finishes.');
   return interaction.editReply(`🔎 Found: **${track.title}**`);
 }

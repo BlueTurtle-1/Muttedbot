@@ -37,11 +37,14 @@ export async function execute(interaction) {
   if (!q.current) {
     // We'll import this dynamically to avoid circular dependencies if any
     const { enqueueAndPlay } = await import('../music/player.js');
-    await enqueueAndPlay(interaction.guild, voiceChannel, interaction.channel, track);
+    const added = await enqueueAndPlay(interaction.guild, voiceChannel, interaction.channel, track);
+    if (!added) return interaction.editReply('❌ The queue is full. Try again after a track finishes.');
     return interaction.editReply(`🔎 Started playing: **${track.title}**`);
   }
 
   // If a song IS playing, insert it at the front of the queue (index 0)
-  q.tracks.unshift(track);
+  if (!q.add(track, { front: true })) {
+    return interaction.editReply('❌ The queue is full. Try again after a track finishes.');
+  }
   return interaction.editReply(`⬆️ Inserted to play next: **${track.title}**`);
 }
