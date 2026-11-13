@@ -15,9 +15,8 @@ import fs from 'node:fs';
 
 const yt = new Ytdl();
 
-// 👇 1. UPDATED HELPER FUNCTION (Accepts an optional specific track)
+// Helper function for safe cleanup
 function cleanupCurrentTrack(q, specificTrack = null) {
-  // Use the specific track passed in, or fallback to q.current
   const trackToClean = specificTrack || q.current; 
 
   if (trackToClean && trackToClean.filePath) {
@@ -29,7 +28,6 @@ function cleanupCurrentTrack(q, specificTrack = null) {
         console.error(`Failed to delete file: ${trackToClean.filePath}`, err);
       }
     }
-    // Clear the filePath so we don't try to delete it again
     trackToClean.filePath = null; 
   }
 }
@@ -157,8 +155,19 @@ export function skipTrack(guildId) {
   const q = getQueue(guildId);
   if (!q.player) return false;
   
-  // 👇 Explicitly pass the current track to ensure it gets deleted
-  cleanupCurrentTrack(q, q.current); 
+  // 👇 Directly delete the file BEFORE stopping the player to prevent the Idle race condition
+  if (q.current && q.current.filePath) {
+    if (fs.existsSync(q.current.filePath)) {
+      try {
+        fs.unlinkSync(q.current.filePath);
+        console.log(`🗑️ Deleted skipped temp file: ${q.current.filePath}`);
+      } catch (err) {
+        console.error(`Failed to delete skipped file: ${q.current.filePath}`, err);
+      }
+    }
+    q.current.filePath = null; // Clear it so the Idle event doesn't try again
+  }
+
   q.player.stop();
   return true;
 }
@@ -176,8 +185,18 @@ export function resumeTrack(guildId) {
 export function stopAndLeave(guildId) {
   const q = getQueue(guildId);
   
-  // 1. Clean up the currently playing file
-  cleanupCurrentTrack(q); 
+  // 1. Directly delete the currently playing file BEFORE stopping
+  if (q.current && q.current.filePath) {
+    if (fs.existsSync(q.current.filePath)) {
+      try {
+        fs.unlinkSync(q.current.filePath);
+        console.log(`🗑️ Deleted current temp file: ${q.current.filePath}`);
+      } catch (err) {
+        console.error(`Failed to delete current file: ${q.current.filePath}`, err);
+      }
+    }
+    q.current.filePath = null;
+  }
   
   // 2. Clean up any files waiting in the queue
   q.tracks.forEach((track) => {
