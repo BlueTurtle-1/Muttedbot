@@ -15,7 +15,7 @@ import fs from 'node:fs';
 
 const yt = new Ytdl();
 
-// 👇 1. NEW HELPER FUNCTION for safe cleanup
+// 👇 1. UPDATED HELPER FUNCTION (Prevents double-deletion)
 function cleanupCurrentTrack(q) {
   if (q.current && q.current.filePath) {
     if (fs.existsSync(q.current.filePath)) {
@@ -26,6 +26,8 @@ function cleanupCurrentTrack(q) {
         console.error(`Failed to delete file: ${q.current.filePath}`, err);
       }
     }
+    // Clear the filePath so we don't try to delete it again
+    q.current.filePath = null; 
   }
 }
 
@@ -51,14 +53,14 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
     q.volume = config.defaultVolume;
 
     q.player.on(AudioPlayerStatus.Idle, () => {
-      cleanupCurrentTrack(q); // 👈 Use the helper here
+      cleanupCurrentTrack(q);
       playNext(guild.id);
     });
 
     q.player.on('error', (err) => {
       console.error('Audio player error:', err);
       q.textChannel?.send(`⚠️ Playback error: ${err.message}`);
-      cleanupCurrentTrack(q); // 👈 Cleanup on error too
+      cleanupCurrentTrack(q);
       playNext(guild.id);
     });
     
@@ -70,7 +72,7 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
       console.log(`Connection State: ${oldState.status} -> ${newState.status}`);
     });
 
-    // 👇 2. CATCH FORCED DISCONNECTS (e.g., kicked from channel)
+    // Catch forced disconnects
     q.connection.on('destroy', () => {
       cleanupCurrentTrack(q);
     });
@@ -152,7 +154,7 @@ export function skipTrack(guildId) {
   const q = getQueue(guildId);
   if (!q.player) return false;
   
-  cleanupCurrentTrack(q); // 👈 Cleanup before skipping
+  cleanupCurrentTrack(q); // Cleanup before skipping
   q.player.stop();
   return true;
 }
@@ -167,10 +169,24 @@ export function resumeTrack(guildId) {
   return q.player?.unpause() ?? false;
 }
 
+// 👇 2. UPDATED STOP AND LEAVE (Clears queue files too)
 export function stopAndLeave(guildId) {
   const q = getQueue(guildId);
   
-  cleanupCurrentTrack(q); // 👈 Cleanup before leaving
+  // 1. Clean up the currently playing file
+  cleanupCurrentTrack(q); 
+  
+  // 2. Clean up any files waiting in the queue
+  q.tracks.forEach((track) => {
+    if (track.filePath && fs.existsSync(track.filePath)) {
+      try {
+        fs.unlinkSync(track.filePath);
+        console.log(`🗑️ Deleted queued temp file: ${track.filePath}`);
+      } catch (err) {
+        console.error(`Failed to delete queued file: ${track.filePath}`, err);
+      }
+    }
+  });
   
   q.clear();
   q.player?.stop();
@@ -193,7 +209,7 @@ function setupAutoLeave(guildId) {
         entersState(q.connection, VoiceConnectionStatus.Connecting, 5000),
       ]);
     } catch {
-      cleanupCurrentTrack(q); // 👈 Cleanup if disconnected unexpectedly
+      cleanupCurrentTrack(q); 
       stopAndLeave(guildId);
     }
   });
