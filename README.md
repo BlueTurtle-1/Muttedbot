@@ -1,2 +1,19 @@
-Chud's second commit
-<img width="912" height="1120" alt="1Rkpd" src="https://github.com/user-attachments/assets/1b38dea4-13c8-484e-8fad-429fa7b6cc82" />
+Install
+
+```git clone```
+
+Make .env file and paste in Discord bot token
+
+```
+DISCORD_TOKEN=
+CLIENT_ID=
+GUILD_ID=
+STT_SERVICE_URL=http://localhost:8000/transcribe
+WAKE_WORD=hey mutted bot
+DEFAULT_VOLUME=50
+AUTO_LEAVE_MS=300000
+```
+
+Start Command
+
+```npm start```
