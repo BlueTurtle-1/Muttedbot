@@ -111,12 +111,14 @@ export async function execute(interaction) {
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
 
     const filePath = path.join(tempDir, `${Date.now()}-${file.name}`);
+    let downloadSuccess = false; // 👈 Track if download finishes
 
     try {
       const response = await fetch(file.url);
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       
       await pipeline(Readable.fromWeb(response.body), createWriteStream(filePath));
+      downloadSuccess = true; // 👈 Mark as successful
 
       const track = {
         title: file.name,
@@ -130,10 +132,23 @@ export async function execute(interaction) {
       }
 
       return interaction.editReply(`📁 Added to queue: **${file.name}**`);
+      
     } catch (error) {
       console.error('File download error:', error);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      return interaction.editReply('❌ Failed to download and queue the file.');
+      
+      // 👇 Cleanup if download failed OR if skipped mid-download
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+          console.log(`🗑️ Deleted failed/partial file: ${filePath}`);
+        } catch (err) {
+          console.error(`Failed to delete partial file: ${filePath}`, err);
+        }
+      }
+      
+      if (!downloadSuccess) {
+        return interaction.editReply('❌ Failed to download and queue the file.');
+      }
     }
   }
 }

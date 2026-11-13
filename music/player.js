@@ -15,19 +15,22 @@ import fs from 'node:fs';
 
 const yt = new Ytdl();
 
-// 👇 1. UPDATED HELPER FUNCTION (Prevents double-deletion)
-function cleanupCurrentTrack(q) {
-  if (q.current && q.current.filePath) {
-    if (fs.existsSync(q.current.filePath)) {
+// 👇 1. UPDATED HELPER FUNCTION (Accepts an optional specific track)
+function cleanupCurrentTrack(q, specificTrack = null) {
+  // Use the specific track passed in, or fallback to q.current
+  const trackToClean = specificTrack || q.current; 
+
+  if (trackToClean && trackToClean.filePath) {
+    if (fs.existsSync(trackToClean.filePath)) {
       try {
-        fs.unlinkSync(q.current.filePath);
-        console.log(`🗑️ Deleted temp file: ${q.current.filePath}`);
+        fs.unlinkSync(trackToClean.filePath);
+        console.log(`🗑️ Deleted temp file: ${trackToClean.filePath}`);
       } catch (err) {
-        console.error(`Failed to delete file: ${q.current.filePath}`, err);
+        console.error(`Failed to delete file: ${trackToClean.filePath}`, err);
       }
     }
     // Clear the filePath so we don't try to delete it again
-    q.current.filePath = null; 
+    trackToClean.filePath = null; 
   }
 }
 
@@ -154,7 +157,8 @@ export function skipTrack(guildId) {
   const q = getQueue(guildId);
   if (!q.player) return false;
   
-  cleanupCurrentTrack(q); // Cleanup before skipping
+  // 👇 Explicitly pass the current track to ensure it gets deleted
+  cleanupCurrentTrack(q, q.current); 
   q.player.stop();
   return true;
 }
@@ -169,7 +173,6 @@ export function resumeTrack(guildId) {
   return q.player?.unpause() ?? false;
 }
 
-// 👇 2. UPDATED STOP AND LEAVE (Clears queue files too)
 export function stopAndLeave(guildId) {
   const q = getQueue(guildId);
   
