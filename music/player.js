@@ -11,9 +11,23 @@ import {
 import { Ytdl, Quality } from '@distube/ytdl-core';
 import { getQueue, deleteQueue } from './queue.js';
 import { config } from '../config.js';
-import fs from 'node:fs'; // 👈 Added for file cleanup
+import fs from 'node:fs';
 
 const yt = new Ytdl();
+
+// 👇 1. NEW HELPER FUNCTION for safe cleanup
+function cleanupCurrentTrack(q) {
+  if (q.current && q.current.filePath) {
+    if (fs.existsSync(q.current.filePath)) {
+      try {
+        fs.unlinkSync(q.current.filePath);
+        console.log(`🗑️ Deleted temp file: ${q.current.filePath}`);
+      } catch (err) {
+        console.error(`Failed to delete file: ${q.current.filePath}`, err);
+      }
+    }
+  }
+}
 
 export function ensureConnection(guild, voiceChannel, textChannel) {
   const q = getQueue(guild.id);
@@ -37,20 +51,14 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
     q.volume = config.defaultVolume;
 
     q.player.on(AudioPlayerStatus.Idle, () => {
-      // 👇 DELETE LOCAL FILE AFTER PLAYING
-      if (q.current && q.current.filePath) {
-        if (fs.existsSync(q.current.filePath)) {
-          fs.unlinkSync(q.current.filePath);
-          console.log(`🗑️ Deleted temp file: ${q.current.filePath}`);
-        }
-      }
-      
+      cleanupCurrentTrack(q); // 👈 Use the helper here
       playNext(guild.id);
     });
 
     q.player.on('error', (err) => {
       console.error('Audio player error:', err);
       q.textChannel?.send(`⚠️ Playback error: ${err.message}`);
+      cleanupCurrentTrack(q); // 👈 Cleanup on error too
       playNext(guild.id);
     });
     
@@ -62,12 +70,16 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
       console.log(`Connection State: ${oldState.status} -> ${newState.status}`);
     });
 
+    // 👇 2. CATCH FORCED DISCONNECTS (e.g., kicked from channel)
+    q.connection.on('destroy', () => {
+      cleanupCurrentTrack(q);
+    });
+
     setupAutoLeave(guild.id);
   }
   return q;
 }
 
-// 👇 EXPORTED for the /link command to use
 export async function playNext(guildId) {
   const q = getQueue(guildId);
   const track = q.next();
@@ -77,7 +89,6 @@ export async function playNext(guildId) {
     return;
   }
 
-  // Check if the track is invalid
   if ((!track.url || typeof track.url !== 'string') && !track.filePath) {
     console.error(`❌ Cannot play "${track.title}": URL/File is missing or invalid.`);
     q.textChannel?.send(`⚠️ Couldn't play **${track.title}** (invalid source), skipping.`);
@@ -85,7 +96,6 @@ export async function playNext(guildId) {
   }
 
   try {
-    // WAIT for the voice connection to be fully Ready
     try {
       await entersState(q.connection, VoiceConnectionStatus.Ready, 30000);
     } catch (error) {
@@ -96,19 +106,12 @@ export async function playNext(guildId) {
 
     let resource;
 
-    // ==========================================
-    // 📁 LOCAL FILE LOGIC
-    // ==========================================
     if (track.filePath) {
       resource = createAudioResource(track.filePath, {
         inputType: StreamType.Arbitrary,
         inlineVolume: true,
       });
-    } 
-    // ==========================================
-    // 🤖 YOUTUBE URL LOGIC
-    // ==========================================
-    else {
+    } else {
       const info = await yt.getInfo(track.url);
       const stream = yt.download(info, {
         quality: Quality.HighestAudio,
@@ -148,6 +151,8 @@ export async function enqueueAndPlay(guild, voiceChannel, textChannel, track) {
 export function skipTrack(guildId) {
   const q = getQueue(guildId);
   if (!q.player) return false;
+  
+  cleanupCurrentTrack(q); // 👈 Cleanup before skipping
   q.player.stop();
   return true;
 }
@@ -164,6 +169,9 @@ export function resumeTrack(guildId) {
 
 export function stopAndLeave(guildId) {
   const q = getQueue(guildId);
+  
+  cleanupCurrentTrack(q); // 👈 Cleanup before leaving
+  
   q.clear();
   q.player?.stop();
   q.connection?.destroy();
@@ -185,6 +193,7 @@ function setupAutoLeave(guildId) {
         entersState(q.connection, VoiceConnectionStatus.Connecting, 5000),
       ]);
     } catch {
+      cleanupCurrentTrack(q); // 👈 Cleanup if disconnected unexpectedly
       stopAndLeave(guildId);
     }
   });
