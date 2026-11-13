@@ -5,6 +5,25 @@ const positiveInteger = (value, fallback) => {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+const defaultPlayBlacklist = [
+  'sex',
+  'sexual',
+  'porn',
+  'pornography',
+  'hentai',
+  'erotic',
+  'nude',
+  'nudity',
+  'naked',
+  'lingerie',
+  'transparent lingerie',
+  'onlyfans',
+  'bikini haul',
+  'micro bikini',
+  'sexy',
+  'asmr',
+];
+
 export const config = {
   token: process.env.DISCORD_TOKEN,
   clientId: process.env.CLIENT_ID,
@@ -23,4 +42,9 @@ export const config = {
   ),
   maxTempUploadFiles: positiveInteger(process.env.MAX_TEMP_UPLOAD_FILES, 20),
   maxTempUploadBytes: positiveInteger(process.env.MAX_TEMP_UPLOAD_BYTES, 200 * 1024 * 1024),
+  maxQueueTracksPerGuild: positiveInteger(process.env.MAX_QUEUE_TRACKS_PER_GUILD, 50),
+  playBlacklistWords: (process.env.PLAY_BLACKLIST_WORDS ?? defaultPlayBlacklist.join(','))
+    .split(',')
+    .map((word) => word.trim())
+    .filter(Boolean),
 };

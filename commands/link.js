@@ -6,7 +6,8 @@ import { randomUUID } from 'node:crypto';
 import { Ytdl } from '@distube/ytdl-core';
 import play from '@iamtraction/play-dl';
 import { getQueue, getUploadUsage } from '../music/queue.js';
-import { ensureConnection, playNext, enqueueAndPlay } from '../music/player.js';
+import { ensureConnection, playNext, enqueueAndPlay, enqueueManyAndPlay } from '../music/player.js';
+import { isPlayBlacklisted } from '../music/blacklist.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import { config } from '../config.js';
@@ -109,26 +110,48 @@ export async function execute(interaction) {
     // Check if it's a playlist
     if (url.includes('list=')) {
       try {
+        const q = getQueue(interaction.guild.id);
+        const availableSlots = q.availableSlots;
+        if (availableSlots === 0) {
+          return interaction.editReply('❌ The queue is full. Try again after a track finishes.');
+        }
+
         const playlist = await play.playlist_info(url, { incomplete: true });
-        await playlist.fetch();
-        const videos = playlist.videos;
+        const initialVideos = playlist.videos || [];
+        if (initialVideos.length < availableSlots) {
+          await playlist.fetch(availableSlots - initialVideos.length);
+        }
+        const videos = (playlist.videos || []).slice(0, availableSlots);
 
         if (!videos || videos.length === 0) {
           return interaction.editReply('❌ No playable videos found in that playlist.');
         }
 
-        let addedCount = 0;
-        for (const video of videos) {
-          const track = {
-            title: video.title,
-            url: video.url,
-            requestedBy: member.user.username,
-          };
-          await enqueueAndPlay(interaction.guild, voiceChannel, interaction.channel, track);
-          addedCount++;
+        const eligibleVideos = videos.filter((video) =>
+          typeof video.title === 'string' && !isPlayBlacklisted(video.title),
+        );
+        const skippedCount = videos.length - eligibleVideos.length;
+        if (eligibleVideos.length === 0) {
+          return interaction.editReply('❌ No eligible videos found; playlist titles may be blocked or unavailable.');
         }
 
-        return interaction.editReply(`✅ Queued **${addedCount}** songs from the playlist.`);
+        const tracks = eligibleVideos.map((video) => ({
+          title: video.title,
+          url: video.url,
+          requestedBy: member.user.username,
+        }));
+        const added = await enqueueManyAndPlay(
+          interaction.guild,
+          voiceChannel,
+          interaction.channel,
+          tracks,
+        );
+        if (!added) return interaction.editReply('❌ The queue filled up while fetching the playlist. Try again.');
+
+        const skippedMessage = skippedCount > 0
+          ? ` Skipped ${skippedCount} blocked or untitled video(s).`
+          : '';
+        return interaction.editReply(`✅ Queued **${tracks.length}** songs from the playlist.${skippedMessage}`);
       } catch (error) {
         console.error('Playlist fetch error:', error);
         return interaction.editReply('❌ Failed to fetch the playlist.');
@@ -136,12 +159,18 @@ export async function execute(interaction) {
     }
 
     // Single Video
-    let title = 'Linked YouTube Video';
+    let title;
     try {
       const info = await yt.getInfo(url);
-      title = info.videoDetails.title;
+      title = info.videoDetails?.title;
+      if (!title) throw new Error('YouTube returned no video title.');
     } catch (e) {
       console.error("Failed to fetch video title:", e);
+      return interaction.editReply('❌ Could not verify the video title. Please try again later.');
+    }
+
+    if (isPlayBlacklisted(title)) {
+      return interaction.editReply('❌ That video is blocked by the bot’s content filter.');
     }
 
     const track = {
@@ -150,7 +179,8 @@ export async function execute(interaction) {
       requestedBy: member.user.username,
     };
 
-    await enqueueAndPlay(interaction.guild, voiceChannel, interaction.channel, track);
+    const added = await enqueueAndPlay(interaction.guild, voiceChannel, interaction.channel, track);
+    if (!added) return interaction.editReply('❌ The queue is full. Try again after a track finishes.');
     return interaction.editReply(`🔗 Added to queue: **${track.title}**`);
   }
 
@@ -186,6 +216,10 @@ export async function execute(interaction) {
     }
 
     const q = getQueue(guildId);
+    if (!q.canAdd()) {
+      return interaction.editReply('❌ The queue is full. Try again after a track finishes.');
+    }
+
     const guildReservations = getReservedUploadUsage(guildId);
     if (
       q.uploadCount + guildReservations.count >= config.maxQueuedUploadsPerGuild ||
@@ -260,7 +294,11 @@ export async function execute(interaction) {
         requestedBy: member.user.username,
       };
 
-      connectedQueue.add(track);
+      if (!connectedQueue.add(track)) {
+        const error = new Error('Queue filled while the upload was downloading.');
+        error.code = 'QUEUE_FULL';
+        throw error;
+      }
       queued = true;
     } catch (error) {
       console.error('File download error:', error);
@@ -271,6 +309,9 @@ export async function execute(interaction) {
       }
       if (error.code === 'UPLOAD_TOO_LARGE') {
         return interaction.editReply(`❌ Files must be no larger than ${Math.floor(config.maxUploadBytes / (1024 * 1024))} MiB.`);
+      }
+      if (error.code === 'QUEUE_FULL') {
+        return interaction.editReply('❌ The queue filled up while the file was downloading. Try again.');
       }
       return interaction.editReply('❌ Failed to download and queue the file.');
     } finally {
