@@ -2,8 +2,9 @@
 import { config } from '../config.js';
 
 class GuildQueue {
-  constructor(guildId) {
+  constructor(guildId, client) {
     this.guildId = guildId;
+    this.client = client; // 👈 Added this line to store the Discord client
     this.tracks = [];       // { title, url, requestedBy }
     this.current = null;
     this.volume = 50;
@@ -60,9 +61,13 @@ class GuildQueue {
 
 const queues = new Map();
 
-export function getQueue(guildId) {
+export function getQueue(guildId, client = null) {
   if (!queues.has(guildId)) {
-    queues.set(guildId, new GuildQueue(guildId));
+    queues.set(guildId, new GuildQueue(guildId, client));
+  } else if (client) {
+    // If the queue already exists but didn't have the client, attach it
+    const q = queues.get(guildId);
+    if (!q.client) q.client = client;
   }
   return queues.get(guildId);
 }

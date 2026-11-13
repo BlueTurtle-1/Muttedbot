@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client, Collection, GatewayIntentBits } from 'discord.js';
 import { config } from './config.js';
+import { getQueue } from './music/queue.js'; // 👈 Import getQueue
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,5 +35,12 @@ for (const file of fs.readdirSync(eventsPath).filter((f) => f.endsWith('.js'))) 
     client.on(event.name, (...args) => event.execute(...args));
   }
 }
+
+// 👇 Ensure all queues have the client attached when the bot is ready
+client.once('ready', () => {
+  client.guilds.cache.forEach((guild) => {
+    getQueue(guild.id, client);
+  });
+});
 
 client.login(config.token);

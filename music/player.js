@@ -31,6 +31,17 @@ function cleanupTrackFile(q, track, attempts = 0) {
   }
 }
 
+// 👇 Helper function to update the bot's status
+function updateBotPresence(client, track) {
+  if (!client || !client.user) return;
+  
+  if (track) {
+    client.user.setActivity(track.title, { type: 2 }); // 2 = 'LISTENING'
+  } else {
+    client.user.setActivity(null); // Clear status
+  }
+}
+
 export function ensureConnection(guild, voiceChannel, textChannel) {
   const q = getQueue(guild.id);
   if (!q.connection) {
@@ -55,6 +66,7 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
       cleanupTrackFile(q, q.current);
       q.current = null;
       q.playing = false;
+      updateBotPresence(q.client, null); // 👈 Clear status when idle
       if (q.closed) return;
       playNext(guild.id);
     });
@@ -65,6 +77,7 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
       cleanupTrackFile(q, q.current);
       q.current = null;
       q.playing = false;
+      updateBotPresence(q.client, null); // 👈 Clear status on error
       if (q.closed) return;
       playNext(guild.id);
     });
@@ -89,6 +102,7 @@ export async function playNext(guildId) {
 
   if (!track) {
     q.playing = false;
+    updateBotPresence(q.client, null); // 👈 Clear status if queue is empty
     return;
   }
   q.playing = true;
@@ -142,6 +156,9 @@ export async function playNext(guildId) {
     q.player.play(resource);
     q.playing = true;
     q.current = track;
+    
+    // 👇 Update the bot's status with the new track
+    updateBotPresence(q.client, track);
     
     q.textChannel?.send(`🎶 Now playing: **${track.title}** (requested by ${track.requestedBy})`);
 
@@ -202,6 +219,9 @@ export function stopAndLeave(guildId) {
   const q = getQueue(guildId);
   for (const track of q.clear()) cleanupTrackFile(q, track);
   q.closed = true;
+  
+  updateBotPresence(q.client, null); // 👈 Clear status when leaving
+  
   const stopped = q.player?.stop() ?? false;
   if (!stopped) {
     cleanupTrackFile(q, q.current);
