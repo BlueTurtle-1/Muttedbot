@@ -12,23 +12,31 @@ import { Ytdl, Quality } from '@distube/ytdl-core';
 import { getQueue, deleteQueue } from './queue.js';
 import { config } from '../config.js';
 import fs from 'node:fs';
+import path from 'node:path';
 
 const yt = new Ytdl();
 
-// Helper function for safe cleanup
-function cleanupCurrentTrack(q, specificTrack = null) {
-  const trackToClean = specificTrack || q.current; 
+// 👇 NEW BRUTE-FORCE CLEANUP FUNCTION
+// This scans the temp folder and deletes any file that isn't the actively playing one.
+function sweepTempFolder(keepFilePath = null) {
+  const tempDir = path.join(process.cwd(), 'temp');
+  if (!fs.existsSync(tempDir)) return;
 
-  if (trackToClean && trackToClean.filePath) {
-    if (fs.existsSync(trackToClean.filePath)) {
-      try {
-        fs.unlinkSync(trackToClean.filePath);
-        console.log(`🗑️ Deleted temp file: ${trackToClean.filePath}`);
-      } catch (err) {
-        console.error(`Failed to delete file: ${trackToClean.filePath}`, err);
-      }
+  const files = fs.readdirSync(tempDir);
+  for (const file of files) {
+    const fullPath = path.join(tempDir, file);
+    
+    // If this file is the one currently playing, DO NOT delete it.
+    if (keepFilePath && path.resolve(fullPath) === path.resolve(keepFilePath)) {
+      continue;
     }
-    trackToClean.filePath = null; 
+
+    try {
+      fs.unlinkSync(fullPath);
+      console.log(`🗑️ Swept and deleted orphaned temp file: ${file}`);
+    } catch (err) {
+      console.error(`Failed to sweep file: ${file}`, err);
+    }
   }
 }
 
@@ -42,7 +50,6 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
       selfDeaf: false,
     });
     
-    // Prevent auto-pause
     q.player = createAudioPlayer({
       behaviors: {
         noSubscriber: NoSubscriberBehavior.Play
@@ -54,14 +61,15 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
     q.volume = config.defaultVolume;
 
     q.player.on(AudioPlayerStatus.Idle, () => {
-      cleanupCurrentTrack(q);
+      // When a song ends naturally, sweep the folder (no file is playing now)
+      sweepTempFolder(null); 
       playNext(guild.id);
     });
 
     q.player.on('error', (err) => {
       console.error('Audio player error:', err);
       q.textChannel?.send(`⚠️ Playback error: ${err.message}`);
-      cleanupCurrentTrack(q);
+      sweepTempFolder(null);
       playNext(guild.id);
     });
     
@@ -73,9 +81,8 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
       console.log(`Connection State: ${oldState.status} -> ${newState.status}`);
     });
 
-    // Catch forced disconnects
     q.connection.on('destroy', () => {
-      cleanupCurrentTrack(q);
+      sweepTempFolder(null); // Clean up if disconnected
     });
 
     setupAutoLeave(guild.id);
@@ -110,11 +117,17 @@ export async function playNext(guildId) {
     let resource;
 
     if (track.filePath) {
+      // 👇 IMPORTANT: Before playing the new file, sweep any old files left behind
+      sweepTempFolder(track.filePath); 
+
       resource = createAudioResource(track.filePath, {
         inputType: StreamType.Arbitrary,
         inlineVolume: true,
       });
     } else {
+      // If we are playing a YouTube link, sweep ALL files in temp
+      sweepTempFolder(null);
+
       const info = await yt.getInfo(track.url);
       const stream = yt.download(info, {
         quality: Quality.HighestAudio,
@@ -155,19 +168,9 @@ export function skipTrack(guildId) {
   const q = getQueue(guildId);
   if (!q.player) return false;
   
-  // 👇 Directly delete the file BEFORE stopping the player to prevent the Idle race condition
-  if (q.current && q.current.filePath) {
-    if (fs.existsSync(q.current.filePath)) {
-      try {
-        fs.unlinkSync(q.current.filePath);
-        console.log(`🗑️ Deleted skipped temp file: ${q.current.filePath}`);
-      } catch (err) {
-        console.error(`Failed to delete skipped file: ${q.current.filePath}`, err);
-      }
-    }
-    q.current.filePath = null; // Clear it so the Idle event doesn't try again
-  }
-
+  // 👇 When skipping, sweep EVERYTHING. The next song will download/sweep anyway.
+  sweepTempFolder(null); 
+  
   q.player.stop();
   return true;
 }
@@ -185,30 +188,8 @@ export function resumeTrack(guildId) {
 export function stopAndLeave(guildId) {
   const q = getQueue(guildId);
   
-  // 1. Directly delete the currently playing file BEFORE stopping
-  if (q.current && q.current.filePath) {
-    if (fs.existsSync(q.current.filePath)) {
-      try {
-        fs.unlinkSync(q.current.filePath);
-        console.log(`🗑️ Deleted current temp file: ${q.current.filePath}`);
-      } catch (err) {
-        console.error(`Failed to delete current file: ${q.current.filePath}`, err);
-      }
-    }
-    q.current.filePath = null;
-  }
-  
-  // 2. Clean up any files waiting in the queue
-  q.tracks.forEach((track) => {
-    if (track.filePath && fs.existsSync(track.filePath)) {
-      try {
-        fs.unlinkSync(track.filePath);
-        console.log(`🗑️ Deleted queued temp file: ${track.filePath}`);
-      } catch (err) {
-        console.error(`Failed to delete queued file: ${track.filePath}`, err);
-      }
-    }
-  });
+  // 👇 Sweep everything when leaving
+  sweepTempFolder(null);
   
   q.clear();
   q.player?.stop();
@@ -231,7 +212,7 @@ function setupAutoLeave(guildId) {
         entersState(q.connection, VoiceConnectionStatus.Connecting, 5000),
       ]);
     } catch {
-      cleanupCurrentTrack(q); 
+      sweepTempFolder(null);
       stopAndLeave(guildId);
     }
   });
