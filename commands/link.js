@@ -47,7 +47,24 @@ export async function execute(interaction) {
   // 🎵 HANDLE URL (YouTube Video or Playlist)
   // ==========================================
   if (url) {
-    if (!url.includes('youtube.com/') && !url.includes('youtu.be/')) {
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      return interaction.editReply('❌ Please provide a valid YouTube link.');
+    }
+
+    const protocol = parsedUrl.protocol.toLowerCase();
+    const host = parsedUrl.hostname.toLowerCase();
+    const allowedHosts = new Set([
+      'youtube.com',
+      'www.youtube.com',
+      'm.youtube.com',
+      'youtu.be',
+      'www.youtu.be',
+    ]);
+
+    if (!['http:', 'https:'].includes(protocol) || !allowedHosts.has(host)) {
       return interaction.editReply('❌ Please provide a valid YouTube link.');
     }
 
