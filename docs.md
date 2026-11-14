@@ -165,11 +165,15 @@ application.
 | `@distube/ytdl-core` | Retrieves YouTube video information and provides audio download streams. |
 | `@iamtraction/play-dl` | Searches YouTube and fetches playlist information. |
 | `@discordjs/opus` | Native Opus codec provider for encoding/decoding voice audio. |
-| `opusscript` | JavaScript Opus codec provider available as an alternative when a native provider is unavailable. |
-| `@snazzah/davey` | Voice-stack support for Discord's voice encryption/protocol requirements. |
 | `libsodium-wrappers` | JavaScript cryptographic primitives used by Discord voice encryption support. |
 | `ffmpeg-static` | Supplies a platform-specific FFmpeg executable for media-processing paths that require FFmpeg. The app does not invoke it directly in its current source. |
 | `dotenv` | Loads environment variables from `.env` when `config.js` is imported. |
+
+`@discordjs/voice` brings in its required Davey implementation transitively.
+`opusscript` is not a project dependency; `prism-media` declares it as an
+optional peer, but the project relies on `@discordjs/opus` as its Opus provider.
+Without `opusscript`, there is no JavaScript codec fallback if the native Opus
+module cannot load.
 
 ## Notes for future changes
 
