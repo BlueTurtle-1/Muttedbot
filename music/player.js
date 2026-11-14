@@ -15,6 +15,22 @@ import fs from 'node:fs';
 
 const yt = new Ytdl();
 
+// 👇 New function to handle the 10-minute timeout
+function startInactiveTimeout(guildId) {
+  const q = getQueue(guildId);
+  
+  // Clear any existing timer
+  if (q.inactiveTimeout) clearTimeout(q.inactiveTimeout);
+
+  console.log(`⏳ Queue empty. Starting 10-minute auto-leave timer for guild ${guildId}.`);
+
+  q.inactiveTimeout = setTimeout(() => {
+    console.log(`⏰ 10 minutes of inactivity. Leaving channel.`);
+    q.textChannel?.send(`👋 Left the channel due to 10 minutes of inactivity.`);
+    stopAndLeave(guildId);
+  }, 10 * 60 * 1000); // 10 minutes in milliseconds
+}
+
 function cleanupTrackFile(q, track, attempts = 0) {
   if (!track?.filePath || track.fileCleaned) return;
 
@@ -31,14 +47,13 @@ function cleanupTrackFile(q, track, attempts = 0) {
   }
 }
 
-// 👇 Helper function to update the bot's status
 function updateBotPresence(client, track) {
   if (!client || !client.user) return;
   
   if (track) {
-    client.user.setActivity(track.title, { type: 2 }); // 2 = 'LISTENING'
+    client.user.setActivity(track.title, { type: 2 });
   } else {
-    client.user.setActivity(null); // Clear status
+    client.user.setActivity(null);
   }
 }
 
@@ -66,9 +81,15 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
       cleanupTrackFile(q, q.current);
       q.current = null;
       q.playing = false;
-      updateBotPresence(q.client, null); // 👈 Clear status when idle
+      updateBotPresence(q.client, null); 
       if (q.closed) return;
-      playNext(guild.id);
+      
+      // 👇 Check if queue is empty to start the timer
+      if (q.tracks.length === 0) {
+        startInactiveTimeout(guild.id);
+      } else {
+        playNext(guild.id);
+      }
     });
 
     q.player.on('error', (err) => {
@@ -77,7 +98,7 @@ export function ensureConnection(guild, voiceChannel, textChannel) {
       cleanupTrackFile(q, q.current);
       q.current = null;
       q.playing = false;
-      updateBotPresence(q.client, null); // 👈 Clear status on error
+      updateBotPresence(q.client, null); 
       if (q.closed) return;
       playNext(guild.id);
     });
@@ -102,7 +123,9 @@ export async function playNext(guildId) {
 
   if (!track) {
     q.playing = false;
-    updateBotPresence(q.client, null); // 👈 Clear status if queue is empty
+    updateBotPresence(q.client, null);
+    // 👇 If we run out of songs here, start the timer
+    startInactiveTimeout(guildId);
     return;
   }
   q.playing = true;
@@ -157,7 +180,6 @@ export async function playNext(guildId) {
     q.playing = true;
     q.current = track;
     
-    // 👇 Update the bot's status with the new track
     updateBotPresence(q.client, track);
     
     q.textChannel?.send(`🎶 Now playing: **${track.title}** (requested by ${track.requestedBy})`);
@@ -177,6 +199,14 @@ export async function enqueueAndPlay(guild, voiceChannel, textChannel, track) {
   const q = getQueue(guild.id);
   if (!q.canAdd()) return false;
   ensureConnection(guild, voiceChannel, textChannel);
+  
+  // 👇 Cancel the inactivity timer because a new song was added
+  if (q.inactiveTimeout) {
+    clearTimeout(q.inactiveTimeout);
+    q.inactiveTimeout = null;
+    console.log(`♻️ Cancelled inactive timer for guild ${guild.id}.`);
+  }
+
   if (!q.add(track)) return false;
   if (!q.playing) {
     q.playing = true;
@@ -191,6 +221,14 @@ export async function enqueueManyAndPlay(guild, voiceChannel, textChannel, track
   const q = getQueue(guild.id);
   if (!q.canAdd(tracks.length)) return false;
   ensureConnection(guild, voiceChannel, textChannel);
+  
+  // 👇 Cancel the inactivity timer because new songs were added
+  if (q.inactiveTimeout) {
+    clearTimeout(q.inactiveTimeout);
+    q.inactiveTimeout = null;
+    console.log(`♻️ Cancelled inactive timer for guild ${guild.id}.`);
+  }
+
   if (!q.addMany(tracks)) return false;
   if (!q.playing) {
     q.playing = true;
@@ -217,10 +255,17 @@ export function resumeTrack(guildId) {
 
 export function stopAndLeave(guildId) {
   const q = getQueue(guildId);
+  
+  // 👇 Clear the timer if the bot is leaving manually
+  if (q.inactiveTimeout) {
+    clearTimeout(q.inactiveTimeout);
+    q.inactiveTimeout = null;
+  }
+  
   for (const track of q.clear()) cleanupTrackFile(q, track);
   q.closed = true;
   
-  updateBotPresence(q.client, null); // 👈 Clear status when leaving
+  updateBotPresence(q.client, null);
   
   const stopped = q.player?.stop() ?? false;
   if (!stopped) {

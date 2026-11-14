@@ -4,8 +4,8 @@ import { config } from '../config.js';
 class GuildQueue {
   constructor(guildId, client) {
     this.guildId = guildId;
-    this.client = client; // 👈 Added this line to store the Discord client
-    this.tracks = [];       // { title, url, requestedBy }
+    this.client = client; 
+    this.tracks = [];       
     this.current = null;
     this.volume = 50;
     this.playing = false;
@@ -15,6 +15,7 @@ class GuildQueue {
     this.uploadCount = 0;
     this.uploadBytes = 0;
     this.closed = false;
+    this.inactiveTimeout = null; // 👈 ADDED THIS LINE for the 10-minute timer
   }
 
   get availableSlots() {
