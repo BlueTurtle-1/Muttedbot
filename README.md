@@ -27,6 +27,8 @@ Upload limits default to 20 MiB per file, a 15-second per-user cooldown, one con
 
 `PLAY_BLACKLIST_WORDS` is a comma-separated list checked against song and artist input for `/play`, plus video titles from `/link` YouTube URLs and playlists. Matching is case-insensitive, ignores punctuation differences, and requires whole words or phrases. If omitted, the starter list shown above is used; set it to an empty value to disable the filter.
 
+For an agent-oriented explanation of how the code and dependencies work, see [Muttedbot/docs.md](./docs.md).
+
 Start Command
 
 ```npm start```
